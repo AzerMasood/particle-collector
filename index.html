@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Particle Arcade Collector</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Font Awesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    body {
+      font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      touch-action: none;
+      overflow: hidden;
+    }
+    canvas {
+      display: block;
+      background: #090d16;
+      touch-action: none;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col justify-between select-none">
+
+  <!-- Header / Scorebar -->
+  <header class="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/90 backdrop-blur z-10">
+    <div class="flex items-center gap-3">
+      <div class="p-2 bg-indigo-600 rounded-lg shadow-lg shadow-indigo-500/30">
+        <i class="fa-solid fa-gamepad text-xl text-white"></i>
+      </div>
+      <div>
+        <h1 class="font-bold text-lg leading-tight">Particle Collector</h1>
+        <p class="text-xs text-slate-400">Arcade Physics Challenge</p>
+      </div>
+    </div>
+
+    <!-- HUD Stats -->
+    <div class="flex items-center gap-6">
+      <div class="text-right">
+        <div class="text-xs text-slate-400 uppercase tracking-wider">Score</div>
+        <div id="score-val" class="font-mono text-xl font-bold text-indigo-400">0</div>
+      </div>
+      <div class="text-right">
+        <div class="text-xs text-slate-400 uppercase tracking-wider">High Score</div>
+        <div id="high-score-val" class="font-mono text-xl font-bold text-amber-400">0</div>
+      </div>
+      <div class="text-right">
+        <div class="text-xs text-slate-400 uppercase tracking-wider">Lives</div>
+        <div id="lives-val" class="flex gap-1 text-rose-500 text-lg">
+          <i class="fa-solid fa-heart"></i>
+          <i class="fa-solid fa-heart"></i>
+          <i class="fa-solid fa-heart"></i>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Game Canvas Container -->
+  <main class="relative flex-1 w-full overflow-hidden flex items-center justify-center">
+    <canvas id="game-canvas" class="w-full h-full cursor-none"></canvas>
+    
+    <!-- Start / Game Over Overlay -->
+    <div id="game-overlay" class="absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center z-20">
+      <div class="max-w-md w-full bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl space-y-4">
+        <h2 id="overlay-title" class="text-3xl font-extrabold text-white">Particle Collector</h2>
+        <p id="overlay-desc" class="text-sm text-slate-300 leading-relaxed">
+          Guide your orb using your cursor/finger. Collect glowing <span class="text-emerald-400 font-semibold">cyan energy orbs</span> while avoiding dangerous <span class="text-rose-500 font-semibold">red hazards</span>!
+        </p>
+        <button id="start-btn" class="w-full py-3 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white font-bold rounded-xl shadow-lg shadow-indigo-600/30 transition-all flex items-center justify-center gap-2">
+          <i class="fa-solid fa-play"></i>
+          <span id="start-btn-text">Start Game</span>
+        </button>
+      </div>
+    </div>
+  </main>
+
+  <!-- Application Logic -->
+  <script>
+    window.addEventListener('DOMContentLoaded', () => {
+      const canvas = document.getElementById('game-canvas');
+      const ctx = canvas.getContext('2d');
+
+      // Game state
+      let width = canvas.width = canvas.parentElement.clientWidth;
+      let height = canvas.height = canvas.parentElement.clientHeight;
+      
+      let isPlaying = false;
+      let score = 0;
+      let highScore = parseInt(localStorage.getItem('particle_collector_hi') || '0');
+      let lives = 3;
+      
+      document.getElementById('high-score-val').textContent = highScore;
+
+      const player = {
+        x: width / 2,
+        y: height / 2,
+        radius: 12,
+        color: '#818cf8',
+        trail: []
+      };
+
+      let collectibles = [];
+      let hazards = [];
+      let particles = []; // Particle explosion effects
+
+      // Spawn items
+      function spawnCollectible() {
+        collectibles.push({
+          x: Math.random() * (width - 40) + 20,
+          y: Math.random() * (height - 40) + 20,
+          radius: 7,
+          color: '#38bdf8',
+          pulse: 0
+        });
+      }
+
+      function spawnHazard() {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 1.5 + Math.random() * 2;
+        hazards.push({
+          x: Math.random() < 0.5 ? 0 : width,
+          y: Math.random() * height,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          radius: 8 + Math.random() * 6,
+          color: '#f43f5e'
+        });
+      }
+
+      function createExplosion(x, y, color, count = 12) {
+        for (let i = 0; i < count; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = Math.random() * 4 + 1;
+          particles.push({
+            x, y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            radius: Math.random() * 3 + 1,
+            color,
+            alpha: 1
+          });
+        }
+      }
+
+      function resetGame() {
+        score = 0;
+        lives = 3;
+        collectibles = [];
+        hazards = [];
+        particles = [];
+        updateHUD();
+
+        for (let i = 0; i < 5; i++) spawnCollectible();
+        for (let i = 0; i < 3; i++) spawnHazard();
+      }
+
+      function updateHUD() {
+        document.getElementById('score-val').textContent = score;
+        const hearts = [];
+        for (let i = 0; i < 3; i++) {
+          hearts.push(i < lives ? '<i class="fa-solid fa-heart"></i>' : '<i class="fa-regular fa-heart text-slate-600"></i>');
+        }
+        document.getElementById('lives-val').innerHTML = hearts.join('');
+      }
+
+      function gameOver() {
+        isPlaying = false;
+        if (score > highScore) {
+          highScore = score;
+          localStorage.setItem('particle_collector_hi', highScore);
+          document.getElementById('high-score-val').textContent = highScore;
+        }
+
+        document.getElementById('overlay-title').textContent = 'Game Over';
+        document.getElementById('overlay-desc').innerHTML = `Final Score: <strong class="text-indigo-400 text-lg">${score}</strong>`;
+        document.getElementById('start-btn-text').textContent = 'Play Again';
+        document.getElementById('game-overlay').classList.remove('hidden');
+      }
+
+      // Animation & Logic Loop
+      function gameLoop() {
+        ctx.clearRect(0, 0, width, height);
+
+        if (isPlaying) {
+          // Render Player Trail
+          player.trail.push({ x: player.x, y: player.y });
+          if (player.trail.length > 8) player.trail.shift();
+
+          player.trail.forEach((t, i) => {
+            ctx.beginPath();
+            ctx.arc(t.x, t.y, player.radius * (i / player.trail.length), 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(129, 140, 248, ${i / player.trail.length * 0.4})`;
+            ctx.fill();
+          });
+
+          // Draw Player
+          ctx.beginPath();
+          ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
+          ctx.fillStyle = player.color;
+          ctx.shadowBlur = 15;
+          ctx.shadowColor = player.color;
+          ctx.fill();
+          ctx.shadowBlur = 0;
+
+          // Process Collectibles
+          collectibles.forEach((c, idx) => {
+            c.pulse += 0.05;
+            const r = c.radius + Math.sin(c.pulse) * 1.5;
+
+            ctx.beginPath();
+            ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
+            ctx.fillStyle = c.color;
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = c.color;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+
+            // Collision check
+            const dist = Math.hypot(player.x - c.x, player.y - c.y);
+            if (dist < player.radius + r) {
+              score += 10;
+              createExplosion(c.x, c.y, c.color, 10);
+              collectibles.splice(idx, 1);
+              spawnCollectible();
+              if (score % 50 === 0) spawnHazard(); // Add difficulty progression
+              updateHUD();
+            }
+          });
+
+          // Process Hazards
+          hazards.forEach((h, idx) => {
+            h.x += h.vx;
+            h.y += h.vy;
+
+            // Screen wrap/bounce
+            if (h.x <= 0 || h.x >= width) h.vx *= -1;
+            if (h.y <= 0 || h.y >= height) h.vy *= -1;
+
+            ctx.beginPath();
+            ctx.arc(h.x, h.y, h.radius, 0, Math.PI * 2);
+            ctx.fillStyle = h.color;
+            ctx.shadowBlur = 12;
+            ctx.shadowColor = h.color;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+
+            // Collision check with player
+            const dist = Math.hypot(player.x - h.x, player.y - h.y);
+            if (dist < player.radius + h.radius) {
+              lives -= 1;
+              createExplosion(player.x, player.y, '#f43f5e', 20);
+              hazards.splice(idx, 1);
+              spawnHazard();
+              updateHUD();
+
+              if (lives <= 0) {
+                gameOver();
+              }
+            }
+          });
+
+          // Render Particle Explosions
+          particles.forEach((p, idx) => {
+            p.x += p.vx;
+            p.y += p.vy;
+            p.alpha -= 0.02;
+
+            if (p.alpha <= 0) {
+              particles.splice(idx, 1);
+            } else {
+              ctx.beginPath();
+              ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+              ctx.fillStyle = p.color;
+              ctx.globalAlpha = p.alpha;
+              ctx.fill();
+              ctx.globalAlpha = 1;
+            }
+          });
+        }
+
+        requestAnimationFrame(gameLoop);
+      }
+
+      // Track pointer movement for player
+      const handlePointer = (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        player.x = clientX - rect.left;
+        player.y = clientY - rect.top;
+      };
+
+      canvas.addEventListener('mousemove', handlePointer);
+      canvas.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        if (e.touches.length > 0) handlePointer(e);
+      }, { passive: false });
+      
+      canvas.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        if (e.touches.length > 0) handlePointer(e);
+      }, { passive: false });
+
+      // Window resize
+      window.addEventListener('resize', () => {
+        width = canvas.width = canvas.parentElement.clientWidth;
+        height = canvas.height = canvas.parentElement.clientHeight;
+      });
+
+      // Start Game Button
+      document.getElementById('start-btn').addEventListener('click', () => {
+        resetGame();
+        isPlaying = true;
+        document.getElementById('game-overlay').classList.add('hidden');
+      });
+
+      // Start loop
+      gameLoop();
+    });
+  </script>
+</body>
+</html>
